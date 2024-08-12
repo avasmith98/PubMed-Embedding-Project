@@ -1,7 +1,7 @@
 
 1. Reads PubMed baseline data file(s) from the NCBI FTP server into memory. Files go from pubmed24n0001 to pubmed24n1219. The number of files processed at once can be adjusted. The default is to only process pubmed24n0001.
 
-2. Compares MD5 checksum of selected file with thr provided checksum from Pubmed. Prints to the console if successful or not.
+2. Compares MD5 checksum of selected file with the provided checksum from Pubmed. Prints to the console if successful or not.
 
 3. Parses XML files to extract key metadata including PMID, abstract, authors, journal details, keywords, and more. Skips articles that have been retracted. The number of articles per file can be adjusted. The default is 10.
 
