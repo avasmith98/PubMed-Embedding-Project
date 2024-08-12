@@ -150,8 +150,7 @@ def insert_payload(client, payload, collection_name):
     response = client.upsert(collection_name=collection_name, points=[point])
     return response
 
-def process_and_upload(file_name, compressed_data, expected_md5, collection_name):
-    # No need to calculate MD5 for the decompressed data; assume compressed data was verified correctly.
+def process_and_upload(file_name, compressed_data, collection_name):
     with gzip.GzipFile(fileobj=compressed_data, mode='rb') as f_in:
         extracted_data = f_in.read()
     
@@ -192,7 +191,7 @@ def main():
         if calculated_md5 == expected_md5:
             compressed_data.seek(0)  # Reset buffer position
             print(f"Checksums matched. Processing file {file_name}...")
-            process_and_upload(file_name, compressed_data, expected_md5, collection_name)
+            process_and_upload(file_name, compressed_data, collection_name)
         else:
             print(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
 
