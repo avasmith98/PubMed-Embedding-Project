@@ -32,7 +32,7 @@ def ensure_collection_exists(client, collection_name, vector_size):
             vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
         )
 
-def parse_pubmed_articles(data, max_articles=5): #get rid of max_articles when ready to run on full dataset
+def parse_pubmed_articles(data, max_articles): #get rid of max_articles when ready to run on full dataset
     root = ET.fromstring(data)
     articles_data = []
     article_count = 0
@@ -155,7 +155,7 @@ def process_and_upload(file_name, compressed_data, expected_md5, collection_name
     with gzip.GzipFile(fileobj=compressed_data, mode='rb') as f_in:
         extracted_data = f_in.read()
     
-    articles_data = parse_pubmed_articles(extracted_data, max_articles=5)  # get rid of max_articles when ready to run on full dataset
+    articles_data = parse_pubmed_articles(extracted_data, max_articles=10)  # get rid of max_articles when ready to run on full dataset
     if articles_data:
         for article_data in articles_data:
             payload = generate_payload(article_data)
@@ -172,7 +172,7 @@ def main():
     vector_size = 1536
     ensure_collection_exists(qdrant_client, collection_name, vector_size)
 
-    for i in range(1, 2):  # Adjust the range up to 1220(?) for the full dataset. Run in chunks.
+    for i in range(1, 2):  # Adjust the range up to 1220 for the full dataset. Goes from pumed24n0001.xml.gz to pubmed24n1220.xml.gz.
         file_name = file_pattern.format(i)
         md5_file_name = md5_file_pattern.format(i)
         
@@ -191,6 +191,7 @@ def main():
 
         if calculated_md5 == expected_md5:
             compressed_data.seek(0)  # Reset buffer position
+            print(f"Checksums matched. Processing file {file_name}...")
             process_and_upload(file_name, compressed_data, expected_md5, collection_name)
         else:
             print(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
