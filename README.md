@@ -3,7 +3,7 @@
 
 2. Compares MD5 checksum of selected file with the provided checksum from Pubmed. Prints to the console if successful or not.
 
-3. Parses XML files to extract key metadata including PMID, abstract, authors, journal details, keywords, and more. Skips articles that have been retracted. The number of articles per file can be adjusted. The default is 10.
+3. Parses XML files to extract key metadata including PMID, abstract, authors, journal details, keywords, and more. Skips articles that have been retracted or do not have an abstract. The number of articles per file can be adjusted. The default is 10.
 
 4. Generates embeddings for article abstracts using OpenAI's text-embedding-3-small model.
 
