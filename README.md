@@ -7,4 +7,4 @@
 
 4. Generates embeddings for article abstracts using OpenAI's text-embedding-3-small model.
 
-5. Creates (if necessary) and stores the processed data and embeddings in a Qdrant vector database. (Data resides in the docker container...maybe find a different way to store it)
+5. Creates (if necessary) a collection and stores the processed data and embeddings in the collection/Qdrant vector database. (Data resides in the docker container...maybe find a different way to store it)
