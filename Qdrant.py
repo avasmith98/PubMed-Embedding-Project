@@ -171,7 +171,7 @@ def main():
     vector_size = 1536
     ensure_collection_exists(qdrant_client, collection_name, vector_size)
 
-    for i in range(1, 2):  # Adjust the range up to 1220 for the full dataset. Goes from pumed24n0001.xml.gz to pubmed24n1220.xml.gz.
+    for i in range(1, 2):  # Adjust the range up to 1220 for the full dataset. Goes from pumed24n0001.xml.gz to pubmed24n1219.xml.gz.
         file_name = file_pattern.format(i)
         md5_file_name = md5_file_pattern.format(i)
         
