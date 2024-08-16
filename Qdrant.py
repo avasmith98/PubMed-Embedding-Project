@@ -3,6 +3,7 @@ import ftplib
 import gzip
 from io import BytesIO
 import os
+import ollama
 import xml.etree.ElementTree as ET
 from openai import OpenAI
 from qdrant_client import QdrantClient
@@ -16,23 +17,35 @@ md5_file_pattern = "pubmed24n{:04d}.xml.gz.md5"
 
 # OpenAI client setup
 open_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_2"))
-MODEL = "text-embedding-3-small"
 
 # Qdrant client setup
 qdrant_client = QdrantClient(host='localhost', port=6333)
 
-def generate_text_embedding(text, model=MODEL):
+def generate_openai_text_embedding(text, model="text-embedding-3-small"):
     response = open_client.embeddings.create(input=[text], model=model)
     return response.data[0].embedding
 
-def ensure_collection_exists(client, collection_name, vector_size):
+def generate_bgem3_embedding(text, model='bge-m3'):
+    response = ollama.embeddings(model=model, prompt=text)
+    return response['embedding']
+
+def generate_bge_large_embedding(text, model='bge-large'):
+    response = ollama.embeddings(model=model, prompt=text)
+    return response['embedding']
+   
+
+def ensure_collection_exists(client, collection_name):
     if not client.collection_exists(collection_name):
         client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
+            vectors_config={
+                "openai_embedding": VectorParams(size=1536, distance=Distance.COSINE),
+                "bgem3_embedding": VectorParams(size=1024, distance=Distance.COSINE),
+                "bge_large_embedding": VectorParams(size=1024, distance=Distance.COSINE)
+            }
         )
 
-def parse_pubmed_articles(data, max_articles): #get rid of max_articles when ready to run on full dataset
+def parse_pubmed_articles(data, max_articles): # Remove max_articles for full dataset processing
     root = ET.fromstring(data)
     articles_data = []
     article_count = 0
@@ -117,8 +130,10 @@ def parse_pubmed_articles(data, max_articles): #get rid of max_articles when rea
 
 def generate_payload(article_data):
     # Generate text embedding for the abstract
-    embedding = generate_text_embedding(article_data['Abstract'])
-    
+    openai_embedding = generate_openai_text_embedding(article_data['Abstract'])
+    bgem3_embedding = generate_bgem3_embedding(article_data['Abstract'])  
+    bge_large_embedding = generate_bge_large_embedding(article_data['Abstract'])
+
     payload = {
         "pmid": article_data['PMID'],
         "pmid_version": article_data['PMID_Version'],
@@ -137,16 +152,15 @@ def generate_payload(article_data):
         },
         "keywords": article_data['Keywords'],
         "publication_identifiers": article_data['PublicationIdentifiers'],
-        "embedding": embedding  # Add the generated embedding to the payload
+        "openai_embedding": openai_embedding, 
+        "bgem3_embedding": bgem3_embedding,
+        "bge_large_embedding": bge_large_embedding    
     }
     return payload
 
 def insert_payload(client, payload, collection_name):
-    point = PointStruct(
-        id=int(payload['pmid']),  # Use the PMID as the ID
-        vector=payload['embedding'],  # Use the generated embedding
-        payload=payload
-    )
+    point = PointStruct(id=int(payload['pmid']), vector={"openai_embedding": payload['openai_embedding'], "bgem3_embedding": payload['bgem3_embedding'], "bge_large_embedding": payload["bge_large_embedding"]}, payload=payload) 
+    
     response = client.upsert(collection_name=collection_name, points=[point])
     return response
 
@@ -154,7 +168,7 @@ def process_and_upload(file_name, compressed_data, collection_name):
     with gzip.GzipFile(fileobj=compressed_data, mode='rb') as f_in:
         extracted_data = f_in.read()
     
-    articles_data = parse_pubmed_articles(extracted_data, max_articles=10)  # get rid of max_articles when ready to run on full dataset
+    articles_data = parse_pubmed_articles(extracted_data, max_articles=2)  # get rid of max_articles when ready to run on full dataset
     if articles_data:
         for article_data in articles_data:
             payload = generate_payload(article_data)
@@ -168,8 +182,7 @@ def main():
     ftp.cwd(ftp_directory)
 
     collection_name = "PubMed"
-    vector_size = 1536
-    ensure_collection_exists(qdrant_client, collection_name, vector_size)
+    ensure_collection_exists(qdrant_client, collection_name)
 
     for i in range(1, 2):  # Adjust the range up to 1220 for the full dataset. Goes from pumed24n0001.xml.gz to pubmed24n1219.xml.gz.
         file_name = file_pattern.format(i)
