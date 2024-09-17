@@ -24,240 +24,230 @@ logging.basicConfig(level=logging.INFO,
 # Qdrant client setup
 qdrant_client = QdrantClient(host='localhost', port=6333)
 
+# 1. Reusable FTP Connection & File Retrieval Functions
+def ftp_connect(server):
+    """Connect to an FTP server."""
+    ftp = ftplib.FTP(server)
+    ftp.login()
+    return ftp
 
-def read_checkpoint():
-    """Read the list of processed files from the checkpoint file."""
-    if os.path.exists(checkpoint_file):
-        with open(checkpoint_file, 'r') as f:
-            return set(line.strip() for line in f)
-    return set()
+def retrieve_file(ftp, directory, file_name):
+    """Retrieve a file from an FTP server."""
+    ftp.cwd(directory)
+    file_data = BytesIO()
+    ftp.retrbinary(f"RETR {file_name}", file_data.write)
+    return file_data
 
+def close_ftp(ftp):
+    """Close the FTP connection."""
+    ftp.quit()
 
-def update_checkpoint(file_name):
-    """Append the processed file name to the checkpoint file."""
-    with open(checkpoint_file, 'a') as f:
-        f.write(f"{file_name}\n")
+# 2. Generalized Checksum Calculation
+def calculate_checksum(file_data, algorithm='md5'):
+    """Calculate a checksum for the file data using the specified algorithm."""
+    file_data.seek(0)  # Ensure we're at the start of the buffer
+    if algorithm == 'md5':
+        return hashlib.md5(file_data.getvalue()).hexdigest()
+    elif algorithm == 'sha256':
+        return hashlib.sha256(file_data.getvalue()).hexdigest()
+    return None
 
+# 3. Generalized Embedding Generation
+def generate_embedding(text, model):
+    """Generate text embeddings using the specified model."""
+    response = ollama.embeddings(model=model, prompt=text)
+    return response['embedding']
 
-def generate_bgem3_embedding(text, model='bge-m3'):
-    try:
-        response = ollama.embeddings(model=model, prompt=text)
-        return response['embedding']
-    except Exception as e:
-        logging.error(f"Error generating bge-m3 embedding: {e}")
-        return None
-
-def generate_bge_large_embedding(text, model='bge-large'):
-    try:
-        response = ollama.embeddings(model=model, prompt=text)
-        return response['embedding']
-    except Exception as e:
-        logging.error(f"Error generating bge-large embedding: {e}")
-        return None
-
-def ensure_collection_exists(client, collection_name):
-    try:
-        if not client.collection_exists(collection_name):
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config={
-                    "bgem3_embedding": VectorParams(size=1024, distance=Distance.COSINE),
-                    "bge_large_embedding": VectorParams(size=1024, distance=Distance.COSINE)
-                }
-            )
-    except Exception as e:
-        logging.error(f"Error ensuring collection exists: {e}")
-
-def parse_pubmed_articles(data, max_articles): 
-    try:
-        root = ET.fromstring(data)
-        articles_data = []
-        article_count = 0
-
-        for medline_citation in root.findall(".//MedlineCitation"):
-            if article_count >= max_articles:
-                break
-            
-            article_data = {}
-
-            # Extract CommentsCorrections (to handle updates and retractions)
-            comments_corrections = medline_citation.findall(".//CommentsCorrections")
-            is_retracted = any(comment.attrib.get('RefType', '') in ["Retraction of", "Retraction in"] for comment in comments_corrections)
-            if is_retracted:
-                continue  # Skip retracted articles
-            
-            # Extract Abstract
-            abstract_elements = medline_citation.findall(".//Abstract/AbstractText")
-            if abstract_elements:
-                abstract_texts = [abstract.text for abstract in abstract_elements if abstract.text]
-                article_data['Abstract'] = ' '.join(abstract_texts)
-            else:
-                continue  # Skip articles without an abstract
-
-            # Extract PMID
-            article_data['PMID'] = medline_citation.find("PMID").text if medline_citation.find("PMID") is not None else ''
-            article_data['PMID_Version'] = medline_citation.find("PMID").attrib.get('Version', '') if medline_citation.find("PMID") is not None else ''
-
-            # Extract Journal Information
-            journal = medline_citation.find(".//Journal")
-            if journal is not None:
-                article_data['Journal'] = {
-                    'Title': journal.find("Title").text if journal.find("Title") is not None else '',
-                    'Volume': journal.find(".//JournalIssue/Volume").text if journal.find(".//JournalIssue/Volume") is not None else '',
-                    'PubDate': {
-                        'Year': journal.find(".//JournalIssue/PubDate/Year").text if journal.find(".//JournalIssue/PubDate/Year") is not None else '',
-                        'Month': journal.find(".//JournalIssue/PubDate/Month").text if journal.find(".//JournalIssue/PubDate/Month") is not None else '',
-                        'Day': journal.find(".//JournalIssue/PubDate/Day").text if journal.find(".//JournalIssue/PubDate/Day") is not None else ''
-                    }
-                }
-            else:
-                article_data['Journal'] = {
-                    'Title': '',
-                    'Volume': '',
-                    'PubDate': {
-                        'Year': '',
-                        'Month': '',
-                        'Day': ''
-                    }
-                }
-
-            # Extract Article Title
-            article_data['Title'] = medline_citation.find(".//ArticleTitle").text if medline_citation.find(".//ArticleTitle") is not None else ''
-
-            # Extract Authors
-            authors = medline_citation.findall(".//AuthorList/Author")
-            complete_yn = medline_citation.find(".//AuthorList").attrib.get('CompleteYN', 'Y')
-            author_list = []
-            for author in authors:
-                author_data = {
-                    'LastName': author.find("LastName").text if author.find("LastName") is not None else '',
-                    'ForeName': author.find("ForeName").text if author.find("ForeName") is not None else '',
-                }
-                author_list.append(author_data)
-            
-            article_data['Authors'] = author_list
-            article_data['AuthorsComplete'] = complete_yn == 'Y'
-
-            # Extract Keywords
-            keywords = medline_citation.findall(".//Keyword")
-            article_data['Keywords'] = [keyword.text for keyword in keywords if keyword.text]
-
-            # Extract Publication Identifiers
-            article_data['PublicationIdentifiers'] = {
-                'DOI': medline_citation.find(".//ELocationID[@EIdType='doi']").text if medline_citation.find(".//ELocationID[@EIdType='doi']") is not None else '',
-            }
-
-            articles_data.append(article_data)
-            article_count += 1
-
-        return articles_data
-
-    except ET.ParseError as e:
-        logging.error(f"Error parsing PubMed XML: {e}")
-        return []
-
-def generate_payload(article_data):
-    try:
-        # Generate text embeddings for the abstract
-        bgem3_embedding = generate_bgem3_embedding(article_data['Abstract'])  
-        bge_large_embedding = generate_bge_large_embedding(article_data['Abstract'])
-
-        payload = {
-            "pmid": article_data['PMID'],
-            "pmid_version": article_data['PMID_Version'],
-            "title": article_data['Title'],
-            "abstract": article_data['Abstract'],
-            "authors": article_data['Authors'],
-            "authors_complete": article_data['AuthorsComplete'],
-            "journal": {
-                "title": article_data['Journal']['Title'],
-                "volume": article_data['Journal']['Volume'],
-                "pub_date": {
-                    "year": article_data['Journal']['PubDate']['Year'],
-                    "month": article_data['Journal']['PubDate']['Month'],
-                    "day": article_data['Journal']['PubDate']['Day']
-                }
-            },
-            "keywords": article_data['Keywords'],
-            "publication_identifiers": article_data['PublicationIdentifiers'], 
-            "bgem3_embedding": bgem3_embedding,
-            "bge_large_embedding": bge_large_embedding    
-        }
-        return payload
-    except Exception as e:
-        logging.error(f"Error generating payload: {e}")
-        return None
+# 4. Refactored Qdrant Setup
+def ensure_collection_exists(client, collection_name, vector_params):
+    """Ensure the collection exists in Qdrant, creating it if necessary."""
+    if not client.collection_exists(collection_name):
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=vector_params
+        )
 
 def insert_payload(client, payload, collection_name):
-    try:
-        point = PointStruct(id=int(payload['pmid']), vector={"bgem3_embedding": payload['bgem3_embedding'], "bge_large_embedding": payload["bge_large_embedding"]}, payload=payload) 
-        response = client.upsert(collection_name=collection_name, points=[point])
-        return response
-    except Exception as e:
-        logging.error(f"Error inserting payload to Qdrant: {e}")
-        return None
-def process_and_upload(file_name, compressed_data, collection_name):
-    try:
-        with gzip.GzipFile(fileobj=compressed_data, mode='rb') as f_in:
-            extracted_data = f_in.read()
+    """Insert a payload into a Qdrant collection."""
+    point = PointStruct(id=int(payload['pmid']), vector={
+        "bgem3_embedding": payload['bgem3_embedding'], 
+        "bge_large_embedding": payload["bge_large_embedding"]
+    }, payload=payload)
+    response = client.upsert(collection_name=collection_name, points=[point])
+    return response
+
+# 5. Reusable File Processing and Uploading Logic
+def process_and_upload(file_name, compressed_data, collection_name, last_processed_pmid=None):
+    """Process and upload extracted data from a compressed file to Qdrant."""
+    with gzip.GzipFile(fileobj=compressed_data, mode='rb') as f_in:
+        extracted_data = f_in.read()
+    
+    articles_data = parse_pubmed_articles(extracted_data, max_articles=2, last_processed_pmid=last_processed_pmid)  # Adjust max_articles as needed
+    if articles_data:
+        for article_data in articles_data:
+            payload = generate_payload(article_data)
+            if payload:
+                insert_payload(qdrant_client, payload, collection_name)
+                logging.info(f"Inserted article PMID {article_data['PMID']} to Qdrant.")
+    
+    return True
+
+# Checkpoint Functions
+def read_checkpoint():
+    """Read the list of processed files and last processed article from the checkpoint file."""
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, 'r') as f:
+            checkpoints = {}
+            for line in f:
+                parts = line.strip().split(',')
+                file_name = parts[0]
+                last_processed_pmid = parts[1] if len(parts) > 1 else None
+                checkpoints[file_name] = last_processed_pmid
+            return checkpoints
+    return {}
+
+def update_checkpoint(file_name, last_processed_pmid):
+    """Append the processed file name and last processed article to the checkpoint file."""
+    with open(checkpoint_file, 'a') as f:
+        f.write(f"{file_name},{last_processed_pmid}\n")
+
+# Parse PubMed Articles
+def parse_pubmed_articles(data, max_articles, last_processed_pmid=None):
+    """Parse PubMed articles from XML data, optionally skipping already processed articles."""
+    root = ET.fromstring(data)
+    articles_data = []
+    article_count = 0
+    skip = last_processed_pmid is not None
+
+    for medline_citation in root.findall(".//MedlineCitation"):
+        pmid = medline_citation.find("PMID").text if medline_citation.find("PMID") is not None else ''
         
-        articles_data = parse_pubmed_articles(extracted_data, max_articles=2)  # Adjust max_articles as needed
-        if articles_data:
-            for article_data in articles_data:
-                payload = generate_payload(article_data)
-                if payload:
-                    response = insert_payload(qdrant_client, payload, collection_name=collection_name)
-                    logging.info(f"Inserted article PMID {article_data['PMID']} to Qdrant.")
+        # Skip already processed articles
+        if skip:
+            if pmid == last_processed_pmid:
+                skip = False  # Stop skipping once we reach the last processed article
+            continue
         
-        # If we reach this point, all abstracts in the file were processed successfully.
-        return True
-    except Exception as e:
-        logging.error(f"Error processing and uploading file {file_name}: {e}")
-        return False
+        if article_count >= max_articles:
+            break
+        
+        article_data = {}
+        comments_corrections = medline_citation.findall(".//CommentsCorrections")
+        is_retracted = any(comment.attrib.get('RefType', '') in ["Retraction of", "Retraction in"] for comment in comments_corrections)
+        if is_retracted:
+            continue  # Skip retracted articles
+        
+        abstract_elements = medline_citation.findall(".//Abstract/AbstractText")
+        if abstract_elements:
+            abstract_texts = [abstract.text for abstract in abstract_elements if abstract.text]
+            article_data['Abstract'] = ' '.join(abstract_texts)
+        else:
+            continue  # Skip articles without an abstract
+
+        article_data['PMID'] = pmid
+        article_data['PMID_Version'] = medline_citation.find("PMID").attrib.get('Version', '') if medline_citation.find("PMID") is not None else ''
+        
+        journal = medline_citation.find(".//Journal")
+        if journal is not None:
+            article_data['Journal'] = {
+                'Title': journal.find("Title").text if journal.find("Title") is not None else '',
+                'Volume': journal.find(".//JournalIssue/Volume").text if journal.find(".//JournalIssue/Volume") is not None else '',
+                'PubDate': {
+                    'Year': journal.find(".//JournalIssue/PubDate/Year").text if journal.find(".//JournalIssue/PubDate/Year") is not None else '',
+                    'Month': journal.find(".//JournalIssue/PubDate/Month").text if journal.find(".//JournalIssue/PubDate/Month") is not None else '',
+                    'Day': journal.find(".//JournalIssue/PubDate/Day").text if journal.find(".//JournalIssue/PubDate/Day") is not None else ''
+                }
+            }
+        else:
+            article_data['Journal'] = {
+                'Title': '',
+                'Volume': '',
+                'PubDate': {'Year': '', 'Month': '', 'Day': ''}
+            }
+
+        article_data['Title'] = medline_citation.find(".//ArticleTitle").text if medline_citation.find(".//ArticleTitle") is not None else ''
+        authors = medline_citation.findall(".//AuthorList/Author")
+        complete_yn = medline_citation.find(".//AuthorList").attrib.get('CompleteYN', 'Y')
+        author_list = [{'LastName': author.find("LastName").text if author.find("LastName") is not None else '', 'ForeName': author.find("ForeName").text if author.find("ForeName") is not None else ''} for author in authors]
+        
+        article_data['Authors'] = author_list
+        article_data['AuthorsComplete'] = complete_yn == 'Y'
+        article_data['Keywords'] = [keyword.text for keyword in medline_citation.findall(".//Keyword") if keyword.text]
+        article_data['PublicationIdentifiers'] = {
+            'DOI': medline_citation.find(".//ELocationID[@EIdType='doi']").text if medline_citation.find(".//ELocationID[@EIdType='doi']") is not None else '',
+        }
+
+        articles_data.append(article_data)
+        article_count += 1
+
+    return articles_data
+
+# Generate Payload (remains the same)
+def generate_payload(article_data):
+    """Generate a Qdrant payload for a PubMed article."""
+    bgem3_embedding = generate_embedding(article_data['Abstract'], 'bge-m3')  
+    bge_large_embedding = generate_embedding(article_data['Abstract'], 'bge-large')
+
+    payload = {
+        "pmid": article_data['PMID'],
+        "pmid_version": article_data['PMID_Version'],
+        "title": article_data['Title'],
+        "abstract": article_data['Abstract'],
+        "authors": article_data['Authors'],
+        "authors_complete": article_data['AuthorsComplete'],
+        "journal": {
+            "title": article_data['Journal']['Title'],
+            "volume": article_data['Journal']['Volume'],
+            "pub_date": {
+                "year": article_data['Journal']['PubDate']['Year'],
+                "month": article_data['Journal']['PubDate']['Month'],
+                "day": article_data['Journal']['PubDate']['Day']
+            }
+        },
+        "keywords": article_data['Keywords'],
+        "publication_identifiers": article_data['PublicationIdentifiers'], 
+        "bgem3_embedding": bgem3_embedding,
+        "bge_large_embedding": bge_large_embedding    
+    }
+    return payload
 
 def main():
-    try:
-        ftp = ftplib.FTP(ftp_server)
-        ftp.login()
-        ftp.cwd(ftp_directory)
+    ftp = ftp_connect(ftp_server)
 
-        collection_name = "PubMed"
-        ensure_collection_exists(qdrant_client, collection_name)
+    collection_name = "PubMed"
+    vector_params = {
+        "bgem3_embedding": VectorParams(size=1024, distance=Distance.COSINE),
+        "bge_large_embedding": VectorParams(size=1024, distance=Distance.COSINE)
+    }
+    ensure_collection_exists(qdrant_client, collection_name, vector_params)
 
-        # Read checkpoint
-        processed_files = read_checkpoint()
+    processed_files = read_checkpoint()
 
-        for i in range(1, 2):  # Adjust range up to 1220 for the full dataset.
-            file_name = file_pattern.format(i)
-            md5_file_name = md5_file_pattern.format(i)
+    for i in range(1, 2):  # Adjust range up to 1220 for the full dataset.
+        file_name = file_pattern.format(i)
+        md5_file_name = md5_file_pattern.format(i)
 
-            # Skip already processed files
-            if file_name in processed_files:
-                logging.info(f"Skipping already processed file {file_name}")
-                continue
-            
-            # Retrieve and check MD5
-            md5_data = BytesIO()
-            ftp.retrbinary(f"RETR {md5_file_name}", md5_data.write)
-            md5_contents = md5_data.getvalue().decode().strip()
-            expected_md5 = md5_contents.split('=')[1].strip() if '=' in md5_contents else md5_contents.split()[0].strip()
+        if file_name in processed_files:
+            last_processed_pmid = processed_files[file_name]
+            logging.info(f"Resuming file {file_name} from last processed PMID: {last_processed_pmid}")
+        else:
+            last_processed_pmid = None
+            logging.info(f"Processing new file {file_name}")
 
-            # Retrieve the compressed file
-            compressed_data = BytesIO()
-            ftp.retrbinary(f"RETR {file_name}", compressed_data.write)
-            
-            # Calculate MD5 for the compressed data
-            calculated_md5 = hashlib.md5(compressed_data.getvalue()).hexdigest()
+        md5_data = retrieve_file(ftp, ftp_directory, md5_file_name)
+        expected_md5 = md5_data.getvalue().decode().strip().split('=')[1].strip()
 
-            if calculated_md5 == expected_md5:
-                compressed_data.seek(0)  # Reset buffer position
-                logging.info(f"Checksums matched. Processing file {file_name}...")
-                if process_and_upload(file_name, compressed_data, collection_name):
-                    # Update checkpoint after successful processing of the entire file
-                    update_checkpoint(file_name)
-            else:
-                logging.warning(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
+        compressed_data = retrieve_file(ftp, ftp_directory, file_name)
+        calculated_md5 = calculate_checksum(compressed_data)
 
-        ftp.quit()
-    except Exception as e:
-        logging.error(f"Error in main FTP process: {e}")
+        if calculated_md5 == expected_md5:
+            compressed_data.seek(0)
+            logging.info(f"Checksums matched. Processing file {file_name}...")
+            if process_and_upload(file_name, compressed_data, collection_name, last_processed_pmid):
+                last_processed_pmid = processed_files.get(file_name, None)
+                update_checkpoint(file_name, last_processed_pmid)
+        else:
+            logging.warning(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
+
+    close_ftp(ftp)
+
