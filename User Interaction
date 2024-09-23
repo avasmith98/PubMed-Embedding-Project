@@ -1,6 +1,6 @@
 import numpy as np
 from qdrant_client import QdrantClient
-from qdrant_client.models import SearchRequest
+from qdrant_client.http.models import NamedVector
 import ollama
 import logging
 
@@ -13,6 +13,16 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[logging.FileHandler("embedding_search.log"), logging.StreamHandler()])
 
+# Function to map model choice to vector name
+def get_vector_name_for_model(model_choice):
+    if model_choice == 'bge-m3':
+        return 'bgem3_embedding'
+    elif model_choice == 'bge-large':
+        return 'bge_large_embedding'
+    else:
+        raise ValueError("Invalid model choice")
+
+# User prompt to choose between models
 def user_choose_model():
     """Prompt user to choose between bge-m3 or bge-large for embedding generation."""
     print("1. bge-m3 (default)")
@@ -37,19 +47,18 @@ def search_qdrant_similar_abstracts(user_embedding, model_choice, top_n=5):
     """Search the Qdrant database for top N similar abstracts based on cosine similarity."""
     logging.info(f"Searching Qdrant using embedding from model: {model_choice}")
 
-    # Qdrant allows storing multiple vectors; here we specify which vector field to search in
-    vector_name = f"vector_{model_choice}"  # Assume vectors are stored as `vector_bge-m3` and `vector_bge-large`
+    vector_name = get_vector_name_for_model(model_choice)  # Dynamically select vector name
 
-    search_result = qdrant_client.search(
+    search_results = qdrant_client.search(
         collection_name=collection_name,
-        search_request=SearchRequest(
-            vector=user_embedding.tolist(),  # Convert numpy array to list
-            limit=top_n,
-            with_payload=True,  # Return the payload (metadata)
-            vector_name=vector_name  # Specify which vector to compare with
-        )
+        query_vector=NamedVector(
+            name=vector_name,  # Specify the vector field to use for the search
+            vector=user_embedding.tolist()
+        ),
+        limit=top_n,
+        with_payload=True
     )
-    return search_result
+    return search_results
 
 # Find top N similar abstracts based on user input and chosen model
 def find_similar_abstracts(user_input, model_choice, top_n=5):
