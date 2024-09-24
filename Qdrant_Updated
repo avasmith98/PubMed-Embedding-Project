@@ -16,9 +16,6 @@ ftp_directory = "/pubmed/baseline/"
 file_pattern = "pubmed24n{:04d}.xml.gz"
 md5_file_pattern = "pubmed24n{:04d}.xml.gz.md5"
 
-# OpenAI client setup
-open_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY_2"))
-
 # Qdrant client setup
 qdrant_client = QdrantClient(host='localhost', port=6333)
 
@@ -42,12 +39,6 @@ def read_last_pmid():
         with open(PMID_FILE, 'r') as f:
             return int(f.read().strip())
     return None
-
-
-def generate_openai_text_embedding(text, model="text-embedding-3-small"):
-    response = open_client.embeddings.create(input=[text], model=model)
-    logging.info(f"Generated OpenAI embedding for text of length {len(text)}")
-    return response.data[0].embedding
 
 
 def generate_bgem3_embedding(text, model='bge-m3'):
@@ -164,7 +155,6 @@ def parse_pubmed_articles(data, max_articles):
 
 def generate_payload(article_data):
     # Generate text embedding for the abstract
-    openai_embedding = generate_openai_text_embedding(article_data['Abstract'])
     bgem3_embedding = generate_bgem3_embedding(article_data['Abstract'])  
     bge_large_embedding = generate_bge_large_embedding(article_data['Abstract'])
 
@@ -187,7 +177,6 @@ def generate_payload(article_data):
         },
         "keywords": article_data['Keywords'],
         "publication_identifiers": article_data['PublicationIdentifiers'],
-        "openai_embedding": openai_embedding, 
         "bgem3_embedding": bgem3_embedding,
         "bge_large_embedding": bge_large_embedding    
     }
@@ -197,8 +186,7 @@ def generate_payload(article_data):
 
 def insert_payload(client, payload, collection_name):
     # Vectors (embeddings) go into the 'vector' field
-    vectors = {
-        "openai_embedding": payload['openai_embedding'], 
+    vectors = { 
         "bgem3_embedding": payload['bgem3_embedding'], 
         "bge_large_embedding": payload["bge_large_embedding"]
     }
