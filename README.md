@@ -12,4 +12,4 @@ Next, run Qdrant_Updated. The program:
 Next, run the User Interaction file. This program:
 1. Takes a user's question and chosen embedding model.
 2. Convers the user's question to an embedding (uses the chosen embedding model, which will also be the model used in the next step).
-3. Accesses the Qdrant database and returns top abstracts. 
+3. Accesses the Qdrant database and returns top abstracts using cosine similarity. 
