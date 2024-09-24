@@ -58,7 +58,6 @@ def ensure_collection_exists(client, collection_name):
         client.create_collection(
             collection_name=collection_name,
             vectors_config={
-                "openai_embedding": VectorParams(size=1536, distance=Distance.COSINE),
                 "bgem3_embedding": VectorParams(size=1024, distance=Distance.COSINE),
                 "bge_large_embedding": VectorParams(size=1024, distance=Distance.COSINE)
             }
