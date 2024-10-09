@@ -15,7 +15,7 @@ import os
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
-                        logging.FileHandler("my_pubmed_processing.log"),
+                        logging.FileHandler("pubmed_processing.log"),
                         logging.StreamHandler()
                     ])
 
@@ -29,7 +29,7 @@ md5_file_pattern = "pubmed24n{:04d}.xml.gz.md5"
 qdrant_client = QdrantClient(host='localhost', port=6333)
 
 # JSON file to track processed PMIDs
-PROCESSED_PMIDS_FILE = "my_processed_pmids.json"
+PROCESSED_PMIDS_FILE = "processed_pmids.json"
 
 def load_processed_pmids():
     """Load processed PMIDs from a JSON file."""
@@ -184,7 +184,7 @@ def main():
     ftp.cwd(ftp_directory)
     logging.info(f"Changed directory to {ftp_directory}")
 
-    collection_name = "PubMed_2024"
+    collection_name = "PubMed_5"
     ensure_collection_exists(qdrant_client, collection_name)
 
     for i in range(1, 2):  # Adjust the range as needed
