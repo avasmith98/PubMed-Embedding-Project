@@ -240,7 +240,7 @@ def process_and_upload(file_name, compressed_data, collection_name, last_process
 
             payload = generate_payload(article_data)
             response = insert_payload(qdrant_client, payload, collection_name=collection_name)
-            print(response)
+            logging.info(f"Insert payload response: {response}")
 
             # Update the last processed PMID
             write_last_pmid(pmid)
