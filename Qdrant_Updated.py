@@ -284,7 +284,7 @@ def main():
         else:
             logging.error(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
 
-        time.sleep(5)  # Adding a delay of 5 seconds between each file retrieval
+        time.sleep(1)  # Adding a delay of 5 seconds between each file retrieval
 
     ftp.quit()
 
