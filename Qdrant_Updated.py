@@ -9,6 +9,7 @@ from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import logging
+import time  # Import the time module for sleep delays
 
 # FTP server details
 ftp_server = "ftp.ncbi.nlm.nih.gov"
@@ -22,6 +23,15 @@ qdrant_client = QdrantClient(host='localhost', port=6333)
 # Setup logging
 logging.basicConfig(filename='pubmed_processing.log', level=logging.INFO, 
                     format='%(asctime)s %(levelname)s: %(message)s')
+
+# Adding StreamHandler to print log messages to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)  # Set the log level for console output
+console_formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Adding the console handler to the root logger
+logging.getLogger().addHandler(console_handler)
 
 # File to store the last processed PMID
 PMID_FILE = 'last_pmid.txt'
@@ -273,6 +283,8 @@ def main():
             process_and_upload(file_name, compressed_data, collection_name, last_processed_pmid)
         else:
             logging.error(f"MD5 mismatch for file {file_name}. Expected: {expected_md5}, Calculated: {calculated_md5}")
+
+        time.sleep(5)  # Adding a delay of 5 seconds between each file retrieval
 
     ftp.quit()
 
